@@ -2,15 +2,11 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    app_name: str = "DStarix AI Assistant"
-    app_version: str = "1.0.0"
-    debug: bool = True
-
-    gemini_api_key: str = ""
-    database_url: str = ""
+    GEMINI_API_KEY: str
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()

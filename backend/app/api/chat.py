@@ -1,14 +1,27 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+
 from app.schemas.chat import ChatRequest, ChatResponse
+from app.services.llm_service import generate_response
 
 
-router = APIRouter(prefix="/chat", tags=["Chat"])
+router = APIRouter(
+    prefix="/chat",
+    tags=["Chat"]
+)
 
 
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest):
 
-    return ChatResponse(
-        answer=f"You said: {request.message}",
-        session_id=request.session_id
-    )
+    try:
+        response = generate_response(request.message)
+
+        return ChatResponse(
+            response=response
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
