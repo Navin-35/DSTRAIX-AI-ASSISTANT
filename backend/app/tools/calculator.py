@@ -1,31 +1,63 @@
-def calculate(expression: str) -> str:
-    """
-    Safely evaluate basic mathematical expressions.
-    """
+import ast
+import operator
 
-    allowed_characters = (
-        "0123456789"
-        "+-*/(). "
-    )
 
-    if not all(
-        char in allowed_characters
-        for char in expression
-    ):
-        return "Invalid mathematical expression."
+OPERATORS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+}
 
-    try:
 
-        result = eval(
-            expression,
-            {
-                "__builtins__": {}
-            },
-            {}
+def calculate(expression: str):
+
+    def evaluate(node):
+
+        if isinstance(node, ast.Constant):
+
+            if isinstance(node.value, (int, float)):
+                return node.value
+
+            raise ValueError("Invalid number")
+
+        if isinstance(node, ast.BinOp):
+
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+
+            operation = OPERATORS.get(type(node.op))
+
+            if operation is None:
+                raise ValueError(
+                    "Unsupported operation"
+                )
+
+            return operation(left, right)
+
+        if isinstance(node, ast.UnaryOp):
+
+            operation = OPERATORS.get(type(node.op))
+
+            if operation is None:
+                raise ValueError(
+                    "Unsupported operation"
+                )
+
+            return operation(
+                evaluate(node.operand)
+            )
+
+        raise ValueError(
+            "Invalid mathematical expression"
         )
 
-        return str(result)
+    tree = ast.parse(
+        expression,
+        mode="eval"
+    )
 
-    except Exception:
-
-        return "Unable to calculate the expression."
+    return evaluate(tree.body)

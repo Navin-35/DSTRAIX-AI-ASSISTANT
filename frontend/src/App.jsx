@@ -1,13 +1,13 @@
 import React, { useState } from "react";
-import axios from "axios";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+
 function App() {
 
-  // -----------------------------------------
+  // ==========================================================
   // CHAT STATE
-  // -----------------------------------------
+  // ==========================================================
 
   const [messages, setMessages] = useState([]);
 
@@ -16,25 +16,25 @@ function App() {
   const [loading, setLoading] = useState(false);
 
 
-  // -----------------------------------------
+  // ==========================================================
   // MODE
-  // -----------------------------------------
+  // ==========================================================
 
   const [mode, setMode] = useState("chat");
 
 
-  // -----------------------------------------
+  // ==========================================================
   // CONVERSATION
-  // -----------------------------------------
+  // ==========================================================
 
   const [conversationId] = useState(
     () => `conversation-${Date.now()}`
   );
 
 
-  // -----------------------------------------
+  // ==========================================================
   // DOCUMENT STATE
-  // -----------------------------------------
+  // ==========================================================
 
   const [selectedFile, setSelectedFile] =
     useState(null);
@@ -49,29 +49,41 @@ function App() {
     useState("");
 
 
-  // -----------------------------------------
-  // SEND MESSAGE
-  // -----------------------------------------
+  // ==========================================================
+  // ADD MESSAGE
+  // ==========================================================
 
-  const sendMessage = async () => {
+  const addMessage = (
+    role,
+    content
+  ) => {
+
+    setMessages(
+      previous => [
+        ...previous,
+        {
+          role,
+          content
+        }
+      ]
+    );
+
+  };
+
+
+  // ==========================================================
+  // STREAMING CHAT
+  // ==========================================================
+
+  const sendStreamingMessage = async () => {
 
     if (!input.trim() || loading) {
       return;
     }
 
 
-    const currentMessage = input.trim();
-
-
-    // Add user message immediately
-
-    setMessages((previous) => [
-      ...previous,
-      {
-        role: "user",
-        content: currentMessage
-      }
-    ]);
+    const currentMessage =
+      input.trim();
 
 
     setInput("");
@@ -79,149 +91,540 @@ function App() {
     setLoading(true);
 
 
-    try {
+    // --------------------------------------------------------
+    // Add user message
+    // --------------------------------------------------------
 
-      let response;
-
-
-      // -------------------------------------
-      // NORMAL CHAT
-      // -------------------------------------
-
-      if (mode === "chat") {
-
-        response = await axios.post(
-          `${API_URL}/chat/`,
-          {
-            message: currentMessage,
-            conversation_id: conversationId
-          }
-        );
-
-      }
-
-
-      // -------------------------------------
-      // AGENT
-      // -------------------------------------
-
-      else if (mode === "agent") {
-
-        response = await axios.post(
-          `${API_URL}/agent/`,
-          {
-            message: currentMessage
-          }
-        );
-
-      }
-
-
-      // -------------------------------------
-      // DOCUMENT / RAG
-      // -------------------------------------
-
-      else if (mode === "document") {
-
-        if (!storeName) {
-
-          throw new Error(
-            "Please upload a document first."
-          );
-
-        }
-
-
-        response = await axios.post(
-          `${API_URL}/documents/ask`,
-          {
-            question: currentMessage,
-            store_name: storeName
-          }
-        );
-
-      }
-
-
-      // -------------------------------------
-      // GET RESPONSE
-      // -------------------------------------
-
-      let answer;
-
-
-      if (mode === "document") {
-
-        answer = response.data.answer;
-
-      } else {
-
-        answer = response.data.response;
-
-      }
-
-
-      setMessages((previous) => [
+    setMessages(
+      previous => [
         ...previous,
+
+        {
+          role: "user",
+          content: currentMessage
+        },
+
         {
           role: "assistant",
-          content:
-            answer || "No response received."
+          content: ""
         }
-      ]);
+      ]
+    );
+
+
+    try {
+
+      const response = await fetch(
+        `${API_URL}/chat/stream`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json"
+          },
+
+          body: JSON.stringify({
+            message: currentMessage,
+
+            conversation_id:
+              conversationId
+          })
+        }
+      );
+
+
+      // ------------------------------------------------------
+      // HTTP ERROR
+      // ------------------------------------------------------
+
+      if (!response.ok) {
+
+        throw new Error(
+          `Server error: ${response.status}`
+        );
+
+      }
+
+
+      // ------------------------------------------------------
+      // STREAM CHECK
+      // ------------------------------------------------------
+
+      if (!response.body) {
+
+        throw new Error(
+          "Streaming is not supported by this browser."
+        );
+
+      }
+
+
+      // ------------------------------------------------------
+      // STREAM READER
+      // ------------------------------------------------------
+
+      const reader =
+        response.body.getReader();
+
+
+      const decoder =
+        new TextDecoder();
+
+
+      let assistantText = "";
+
+
+      // ------------------------------------------------------
+      // READ CHUNKS
+      // ------------------------------------------------------
+
+      while (true) {
+
+        const {
+          value,
+          done
+        } = await reader.read();
+
+
+        if (done) {
+          break;
+        }
+
+
+        const chunk =
+          decoder.decode(
+            value,
+            {
+              stream: true
+            }
+          );
+
+
+        assistantText += chunk;
+
+
+        // ----------------------------------------------------
+        // Update the last assistant message
+        // ----------------------------------------------------
+
+        setMessages(
+          previous => {
+
+            const updated =
+              [...previous];
+
+
+            updated[
+              updated.length - 1
+            ] = {
+
+              role: "assistant",
+
+              content:
+                assistantText
+
+            };
+
+
+            return updated;
+
+          }
+        );
+
+      }
 
 
     } catch (error) {
 
       console.error(
-        "Request error:",
+        "Streaming error:",
         error
       );
 
 
-      let errorMessage =
-        "Something went wrong. Please try again.";
+      setMessages(
+        previous => {
+
+          const updated =
+            [...previous];
 
 
-      if (
-        error.response &&
-        error.response.data
-      ) {
+          updated[
+            updated.length - 1
+          ] = {
 
-        if (
-          typeof error.response.data.detail ===
-          "string"
-        ) {
+            role: "assistant",
 
-          errorMessage =
-            error.response.data.detail;
+            content:
+              `❌ ${error.message}`
+
+          };
+
+
+          return updated;
 
         }
+      );
 
-      }
-
-
-      setMessages((previous) => [
-        ...previous,
-        {
-          role: "assistant",
-          content: `❌ ${errorMessage}`
-        }
-      ]);
 
     } finally {
 
       setLoading(false);
 
     }
+
   };
 
 
-  // -----------------------------------------
-  // ENTER KEY
-  // -----------------------------------------
+  // ==========================================================
+  // AGENT MESSAGE
+  // ==========================================================
 
-  const handleKeyDown = (event) => {
+  const sendAgentMessage = async () => {
+
+    if (!input.trim() || loading) {
+      return;
+    }
+
+
+    const currentMessage =
+      input.trim();
+
+
+    setInput("");
+
+    setLoading(true);
+
+
+    setMessages(
+      previous => [
+        ...previous,
+
+        {
+          role: "user",
+          content: currentMessage
+        },
+
+        {
+          role: "assistant",
+          content: ""
+        }
+      ]
+    );
+
+
+    try {
+
+      const response =
+        await fetch(
+          `${API_URL}/agent/`,
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body: JSON.stringify({
+              message:
+                currentMessage
+            })
+          }
+        );
+
+
+      if (!response.ok) {
+
+        const errorText =
+          await response.text();
+
+        throw new Error(
+          errorText
+        );
+
+      }
+
+
+      const data =
+        await response.json();
+
+
+      const answer =
+        data.response ||
+        "No response received.";
+
+
+      setMessages(
+        previous => {
+
+          const updated =
+            [...previous];
+
+
+          updated[
+            updated.length - 1
+          ] = {
+
+            role: "assistant",
+
+            content: answer
+
+          };
+
+
+          return updated;
+
+        }
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "Agent error:",
+        error
+      );
+
+
+      setMessages(
+        previous => {
+
+          const updated =
+            [...previous];
+
+
+          updated[
+            updated.length - 1
+          ] = {
+
+            role: "assistant",
+
+            content:
+              `❌ ${error.message}`
+
+          };
+
+
+          return updated;
+
+        }
+      );
+
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
+  };
+
+
+  // ==========================================================
+  // DOCUMENT QUESTION
+  // ==========================================================
+
+  const askDocument = async () => {
+
+    if (!input.trim() || loading) {
+      return;
+    }
+
+
+    if (!storeName) {
+
+      addMessage(
+        "assistant",
+        "❌ Please upload a document first."
+      );
+
+      return;
+
+    }
+
+
+    const currentMessage =
+      input.trim();
+
+
+    setInput("");
+
+    setLoading(true);
+
+
+    setMessages(
+      previous => [
+        ...previous,
+
+        {
+          role: "user",
+          content: currentMessage
+        },
+
+        {
+          role: "assistant",
+          content: ""
+        }
+      ]
+    );
+
+
+    try {
+
+      const response =
+        await fetch(
+          `${API_URL}/documents/ask`,
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json"
+            },
+
+            body: JSON.stringify({
+              question:
+                currentMessage,
+
+              store_name:
+                storeName
+            })
+          }
+        );
+
+
+      if (!response.ok) {
+
+        const errorText =
+          await response.text();
+
+        throw new Error(
+          errorText
+        );
+
+      }
+
+
+      const data =
+        await response.json();
+
+
+      const answer =
+        data.answer ||
+        data.response ||
+        "No answer received.";
+
+
+      setMessages(
+        previous => {
+
+          const updated =
+            [...previous];
+
+
+          updated[
+            updated.length - 1
+          ] = {
+
+            role: "assistant",
+
+            content: answer
+
+          };
+
+
+          return updated;
+
+        }
+      );
+
+
+    } catch (error) {
+
+      console.error(
+        "Document error:",
+        error
+      );
+
+
+      setMessages(
+        previous => {
+
+          const updated =
+            [...previous];
+
+
+          updated[
+            updated.length - 1
+          ] = {
+
+            role: "assistant",
+
+            content:
+              `❌ ${error.message}`
+
+          };
+
+
+          return updated;
+
+        }
+      );
+
+
+    } finally {
+
+      setLoading(false);
+
+    }
+
+  };
+
+
+  // ==========================================================
+  // MAIN SEND FUNCTION
+  // ==========================================================
+
+  const sendMessage = async () => {
+
+    if (mode === "chat") {
+
+      await sendStreamingMessage();
+
+      return;
+
+    }
+
+
+    if (mode === "agent") {
+
+      await sendAgentMessage();
+
+      return;
+
+    }
+
+
+    if (mode === "document") {
+
+      await askDocument();
+
+      return;
+
+    }
+
+  };
+
+
+  // ==========================================================
+  // ENTER KEY
+  // ==========================================================
+
+  const handleKeyDown = (
+    event
+  ) => {
 
     if (
       event.key === "Enter" &&
@@ -233,180 +636,199 @@ function App() {
       sendMessage();
 
     }
+
   };
 
 
-  // -----------------------------------------
+  // ==========================================================
   // CREATE DOCUMENT STORE
-  // -----------------------------------------
+  // ==========================================================
 
-  const createDocumentStore = async () => {
+  const createDocumentStore =
+    async () => {
 
-    const response = await axios.post(
-      `${API_URL}/documents/store`,
-      null,
-      {
-        params: {
-          name: "DSTRAIX Knowledge Base"
-        }
+      const response =
+        await fetch(
+          `${API_URL}/documents/store?name=DSTRAIX%20Knowledge%20Base`,
+          {
+            method: "POST"
+          }
+        );
+
+
+      if (!response.ok) {
+
+        throw new Error(
+          "Failed to create document store."
+        );
+
       }
-    );
 
 
-    const newStoreName =
-      response.data.store_name;
+      const data =
+        await response.json();
 
 
-    setStoreName(
-      newStoreName
-    );
+      const newStore =
+        data.store_name;
 
 
-    return newStoreName;
-  };
-
-
-  // -----------------------------------------
-  // UPLOAD DOCUMENT
-  // -----------------------------------------
-
-  const uploadDocument = async () => {
-
-    if (!selectedFile) {
-
-      setDocumentStatus(
-        "Please select a file first."
+      setStoreName(
+        newStore
       );
 
-      return;
 
-    }
+      return newStore;
+
+    };
 
 
-    setUploading(true);
+  // ==========================================================
+  // UPLOAD DOCUMENT
+  // ==========================================================
 
-    setDocumentStatus(
-      "Creating knowledge store..."
-    );
+  const uploadDocument =
+    async () => {
 
+      if (!selectedFile) {
+
+        setDocumentStatus(
+          "Please select a file first."
+        );
+
+        return;
+
+      }
+
+
+      setUploading(true);
+
+      setDocumentStatus(
+        "Creating knowledge store..."
+      );
+
+
+      try {
+
+        const newStore =
+          await createDocumentStore();
+
+
+        setDocumentStatus(
+          "Uploading and indexing document..."
+        );
+
+
+        const formData =
+          new FormData();
+
+
+        formData.append(
+          "file",
+          selectedFile
+        );
+
+
+        const response =
+          await fetch(
+            `${API_URL}/documents/upload?store_name=${encodeURIComponent(
+              newStore
+            )}`,
+            {
+              method: "POST",
+
+              body: formData
+            }
+          );
+
+
+        if (!response.ok) {
+
+          const errorText =
+            await response.text();
+
+          throw new Error(
+            errorText
+          );
+
+        }
+
+
+        setDocumentStatus(
+          `✓ ${selectedFile.name} uploaded successfully`
+        );
+
+
+        setMode("document");
+
+
+      } catch (error) {
+
+        console.error(
+          "Upload error:",
+          error
+        );
+
+
+        setDocumentStatus(
+          `❌ ${error.message}`
+        );
+
+
+      } finally {
+
+        setUploading(false);
+
+      }
+
+    };
+
+
+  // ==========================================================
+  // CLEAR CHAT
+  // ==========================================================
+
+  const clearChat = async () => {
 
     try {
 
-      // -------------------------------------
-      // Create a store
-      // -------------------------------------
-
-      const newStore =
-        await createDocumentStore();
-
-
-      setDocumentStatus(
-        "Uploading and indexing document..."
-      );
-
-
-      // -------------------------------------
-      // FormData
-      // -------------------------------------
-
-      const formData =
-        new FormData();
-
-
-      formData.append(
-        "file",
-        selectedFile
-      );
-
-
-      // -------------------------------------
-      // Upload
-      // -------------------------------------
-
-      await axios.post(
-        `${API_URL}/documents/upload`,
-        formData,
+      await fetch(
+        `${API_URL}/chat/${conversationId}`,
         {
-          params: {
-            store_name: newStore
-          },
-          headers: {
-            "Content-Type":
-              "multipart/form-data"
-          }
+          method: "DELETE"
         }
       );
-
-
-      setDocumentStatus(
-        `✓ ${selectedFile.name} uploaded successfully`
-      );
-
-
-      // Automatically switch to document mode
-
-      setMode("document");
-
 
     } catch (error) {
 
       console.error(
-        "Upload error:",
+        "Clear conversation error:",
         error
       );
 
-
-      let message =
-        "Document upload failed.";
-
-
-      if (
-        error.response?.data?.detail
-      ) {
-
-        message =
-          error.response.data.detail;
-
-      }
-
-
-      setDocumentStatus(
-        `❌ ${message}`
-      );
-
-    } finally {
-
-      setUploading(false);
-
     }
-  };
 
-
-  // -----------------------------------------
-  // CLEAR CHAT
-  // -----------------------------------------
-
-  const clearChat = () => {
 
     setMessages([]);
 
   };
 
 
-  // -----------------------------------------
+  // ==========================================================
   // UI
-  // -----------------------------------------
+  // ==========================================================
 
   return (
 
     <div className="app">
 
 
-      {/* ================================= */}
+      {/* ================================================== */}
       {/* HEADER */}
-      {/* ================================= */}
+      {/* ================================================== */}
 
       <header className="header">
+
 
         <div className="brand">
 
@@ -433,12 +855,14 @@ function App() {
 
         <div className="mode-selector">
 
+
           <button
             className={
               mode === "chat"
                 ? "mode-button active"
                 : "mode-button"
             }
+
             onClick={() =>
               setMode("chat")
             }
@@ -453,6 +877,7 @@ function App() {
                 ? "mode-button active"
                 : "mode-button"
             }
+
             onClick={() =>
               setMode("agent")
             }
@@ -467,12 +892,14 @@ function App() {
                 ? "mode-button active"
                 : "mode-button"
             }
+
             onClick={() =>
               setMode("document")
             }
           >
             📚 Document
           </button>
+
 
         </div>
 
@@ -489,17 +916,18 @@ function App() {
 
         </div>
 
+
       </header>
 
 
-      {/* ================================= */}
-      {/* MAIN CHAT */}
-      {/* ================================= */}
+      {/* ================================================== */}
+      {/* CHAT */}
+      {/* ================================================== */}
 
       <main className="chat-container">
 
 
-        {/* EMPTY STATE */}
+        {/* WELCOME */}
 
         {messages.length === 0 && (
 
@@ -509,9 +937,11 @@ function App() {
               ✦
             </div>
 
+
             <h2>
               Welcome to DSTRAIX
             </h2>
+
 
             <p>
               Your intelligent AI assistant
@@ -522,8 +952,10 @@ function App() {
 
             <div className="feature-cards">
 
+
               <div
                 className="feature-card"
+
                 onClick={() =>
                   setMode("chat")
                 }
@@ -538,8 +970,8 @@ function App() {
                 </h3>
 
                 <p>
-                  Ask anything and have
-                  natural conversations.
+                  Ask anything and receive
+                  instant streaming answers.
                 </p>
 
               </div>
@@ -547,6 +979,7 @@ function App() {
 
               <div
                 className="feature-card"
+
                 onClick={() =>
                   setMode("agent")
                 }
@@ -570,6 +1003,7 @@ function App() {
 
               <div
                 className="feature-card"
+
                 onClick={() =>
                   setMode("document")
                 }
@@ -590,6 +1024,7 @@ function App() {
 
               </div>
 
+
             </div>
 
           </div>
@@ -601,17 +1036,20 @@ function App() {
 
         <div className="messages">
 
+
           {messages.map(
             (message, index) => (
 
               <div
                 key={index}
+
                 className={
                   message.role === "user"
                     ? "message user-message"
                     : "message assistant-message"
                 }
               >
+
 
                 <div className="avatar">
 
@@ -623,6 +1061,7 @@ function App() {
 
 
                 <div className="message-body">
+
 
                   <div className="message-name">
 
@@ -637,9 +1076,23 @@ function App() {
 
                     {message.content}
 
+                    {loading &&
+                      index ===
+                        messages.length - 1 &&
+                      message.role ===
+                        "assistant" && (
+
+                        <span className="cursor">
+                          ▌
+                        </span>
+
+                      )}
+
                   </div>
 
+
                 </div>
+
 
               </div>
 
@@ -647,29 +1100,26 @@ function App() {
           )}
 
 
-          {/* LOADING */}
+          {/* THINKING */}
 
-          {loading && (
+          {loading &&
+            messages.length === 0 && (
 
-            <div className="message assistant-message">
+              <div className="message assistant-message">
 
-              <div className="avatar">
-                D
-              </div>
-
-              <div className="message-body">
-
-                <div className="message-name">
-                  DSTRAIX
+                <div className="avatar">
+                  D
                 </div>
 
-                <div className="message-content">
+                <div className="message-body">
 
-                  <div className="typing">
+                  <div className="message-name">
+                    DSTRAIX
+                  </div>
 
-                    <span></span>
-                    <span></span>
-                    <span></span>
+                  <div className="message-content">
+
+                    Thinking...
 
                   </div>
 
@@ -677,26 +1127,25 @@ function App() {
 
               </div>
 
-            </div>
+            )}
 
-          )}
 
         </div>
 
       </main>
 
 
-      {/* ================================= */}
+      {/* ================================================== */}
       {/* DOCUMENT UPLOAD */}
-      {/* ================================= */}
+      {/* ================================================== */}
 
       <section className="document-section">
 
+
         <div className="document-upload">
 
-          <label
-            className="file-label"
-          >
+
+          <label className="file-label">
 
             📎
 
@@ -708,18 +1157,24 @@ function App() {
 
             </span>
 
+
             <input
               type="file"
+
               accept=".pdf,.txt,.md,.docx"
-              onChange={(event) => {
 
-                setSelectedFile(
-                  event.target.files?.[0] || null
-                );
+              onChange={
+                (event) => {
 
-                setDocumentStatus("");
+                  setSelectedFile(
+                    event.target.files?.[0] ||
+                    null
+                  );
 
-              }}
+                  setDocumentStatus("");
+
+                }
+              }
             />
 
           </label>
@@ -727,7 +1182,11 @@ function App() {
 
           <button
             className="upload-button"
-            onClick={uploadDocument}
+
+            onClick={
+              uploadDocument
+            }
+
             disabled={
               uploading ||
               !selectedFile
@@ -751,67 +1210,97 @@ function App() {
 
           )}
 
+
         </div>
+
 
       </section>
 
 
-      {/* ================================= */}
+      {/* ================================================== */}
       {/* INPUT */}
-      {/* ================================= */}
+      {/* ================================================== */}
 
       <section className="input-section">
 
+
         <div className="input-box">
 
+
           <textarea
+
             value={input}
-            onChange={(event) =>
-              setInput(
-                event.target.value
-              )
+
+            onChange={
+              (event) =>
+                setInput(
+                  event.target.value
+                )
             }
-            onKeyDown={handleKeyDown}
+
+            onKeyDown={
+              handleKeyDown
+            }
+
             placeholder={
+
               mode === "chat"
                 ? "Ask DSTRAIX anything..."
+
                 : mode === "agent"
                 ? "Ask the DSTRAIX agent..."
+
                 : "Ask something about your document..."
+
             }
+
             rows="1"
+
           />
 
 
           <button
+
             className="send-button"
-            onClick={sendMessage}
+
+            onClick={
+              sendMessage
+            }
+
             disabled={
               loading ||
               !input.trim()
             }
+
           >
 
             ➤
 
           </button>
 
+
         </div>
 
 
         <div className="input-footer">
 
+
           <span>
 
             Mode:
+
             {" "}
 
             <strong>
+
               {mode === "chat"
-                ? "Chat"
+                ? "Streaming Chat"
+
                 : mode === "agent"
-                ? "Agent"
+                ? "AI Agent"
+
                 : "Document RAG"}
+
             </strong>
 
           </span>
@@ -819,18 +1308,27 @@ function App() {
 
           <button
             className="clear-button"
-            onClick={clearChat}
+
+            onClick={
+              clearChat
+            }
           >
+
             Clear chat
+
           </button>
+
 
         </div>
 
+
       </section>
+
 
     </div>
 
   );
 }
+
 
 export default App;
